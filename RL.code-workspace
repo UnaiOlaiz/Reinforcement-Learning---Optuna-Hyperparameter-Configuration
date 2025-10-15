@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "RL",
+			"path": "."
+		},
+		{
+			"name": "deustorl",
+			"path": "../../Downloads/deustorl-20250921T113115Z-1-001/deustorl"
+		}
+	],
+	"settings": {}
+}
