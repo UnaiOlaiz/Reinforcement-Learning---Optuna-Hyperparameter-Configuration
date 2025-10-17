@@ -21,10 +21,10 @@ gym.register_envs(ale_py)
 env_name = 'ALE/Boxing-v5'
 n_steps = 200_000
 
-env = gym.make(env_name, obs_type='grayscale', render_mode='rgb_array')
+env = gym.make(env_name, obs_type='grayscale', render_mode='rgb_array', frameskip=1, repeat_action_probability=0.25)
 
 # List of algorithms we will use
-algoritms = ['PPO', 'SAC', 'SARSA', 'Qlearning', 'Expectedsarsa']
+algoritms = ['SARSA', 'Qlearning', 'Expectedsarsa']
 
 # Function we will use to solve the last 3 algorithms
 def test(algo, n_steps= 60000, **kwargs):
@@ -36,16 +36,11 @@ def test(algo, n_steps= 60000, **kwargs):
     return evaluate_policy(algo.env, algo.q_table, max_policy, n_episodes=100, verbose=False)
 
 for algo in algoritms:
-    if algo == "PPO":
-        model = PPO('MlpPolicy', env, verbose=1, tensorboard_log=f"./tensorboard_logs/tensorboard_{algo.lower()}/")
-        model.learn(n_steps)
-        checkpoint_dir = CheckpointCallback(save_freq=20_000, save_path=f"./checkpoints/checkpoint_{algo.lower()}/",)
-        model.save(f"./models/boxing_model_{algo.lower()}")
-    elif algo == "SARSA":
+    if algo == "SARSA":
         algo = Sarsa(env)
         test(algo, n_steps=n_steps, lr=0.01)
         checkpoint_dir = CheckpointCallback(save_freq=20_000, save_path=f"./checkpoints/checkpoint_{algo.lower()}/")
-        evaluate_policy(env, algo.q_table, max_policy, n_episodes=10, verbose=False)
+        evaluate_policy(env, algo.q_table, max_policy, n_episodes=10, verbose=False) 
     elif algo == "Qlearning":   
         algo = QLearning(env)
         test(algo, n_steps=n_steps, lr=0.01)
