@@ -6,6 +6,7 @@ from deustorl.common import evaluate_policy, EpsilonGreedyPolicy, max_policy
 from deustorl.sarsa import Sarsa
 from deustorl.qlearning import QLearning
 from deustorl.expected_sarsa import ExpectedSarsa
+from deustorl.montecarlo_lrdecay import Montecarlo_FirstVisit_LRDecay
 import time
 import os
 from gymnasium import ObservationWrapper
@@ -41,54 +42,102 @@ class RamFeatureWrapper(ObservationWrapper):
 
 # This function will try different hyperparameter configurations
 def hyperparameter_analysis(t):
+    environment_name = 'ALE/Boxing-v5'
+    env = gym.make(
+        environment_name,
+        obs_type='ram',
+        render_mode=None,   # no render para acelerar
+        frameskip=4         # frameskip mayor para acelerar
+    )
+    env = RamFeatureWrapper(env, num_features=8)
+    env = DiscretizedObservationWrapper(env, n_bins=4)
+
     # We first create the tensorboard log directory for this trial
     tensorboard_log_dir = f"./tensorboard_logs/trial_{t.number}/"
     os.makedirs(tensorboard_log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=tensorboard_log_dir)
-    # Then define the hyperparameters to tune
-    algo_index = t.number % 3  # To cycle through the three algorithms
-    algorithm_name = ["Sarsa", "Qlearning", "Expectedsarsa"][algo_index]
-    learning_rate = t.suggest_float("learning_rate", 1e-5, 1e-1, log=True)
+
+    # --- HP sampling ---
+    algorithm_name = t.suggest_categorical(
+        "algorithm",
+        ["Sarsa", "Qlearning", "ExpectedSarsa", "Montecarlo_FirstVisit_LRDecay"]
+    )
+    learning_rate   = t.suggest_float("learning_rate", 1e-5, 1e-1, log=True)
     discount_factor = t.suggest_float("discount_factor", 0.8, 1.0, step=0.025)
-    epsilon = t.suggest_float("epsilon", 0.0, 0.5, step=0.05)
-    lr_decay = t.suggest_float("lr_decay", 0.85, 1.0, step=0.01)
+    epsilon         = t.suggest_float("epsilon", 0.0, 0.5, step=0.05)
+    lr_decay        = t.suggest_float("lr_decay", 0.85, 1.0, step=0.01)
     lr_episodes_decay = t.suggest_categorical("lr_episodes_decay",[100, 500, 1_000, 5_000, 10_000])
 
-    # Number of steps to train
-    n_steps = 100_000
+    # Number of steps to train (total en el trial)
+    n_steps_total = 100_000
 
     # Depending on the algorithm, we create the corresponding agent
     if algorithm_name == "Sarsa":
-        print("Using SARSA algorithm")
+        print("Using SARSA algorithm"); print("Trial number:", t.number)
         algo = Sarsa(env)
-        print("Trial number:", t.number)
     elif algorithm_name == "Qlearning":
-        print("Using Q-learning algorithm")
-        print("Trial number:", t.number)
+        print("Using Q-learning algorithm"); print("Trial number:", t.number)
         algo = QLearning(env)
-    elif algorithm_name == "Expectedsarsa":
-        print("Using Expected SARSA algorithm")
-        print("Trial number:", t.number)
+    elif algorithm_name == "ExpectedSarsa":
+        print("Using Expected SARSA algorithm"); print("Trial number:", t.number)
         algo = ExpectedSarsa(env)
+    elif algorithm_name == "Montecarlo_FirstVisit_LRDecay":
+        print("Using Monte Carlo First Visit LRDecay algorithm"); print("Trial number:", t.number)
+        algo = Montecarlo_FirstVisit_LRDecay(env)
+    else:
+        raise ValueError(f"Algoritmo desconocido: {algorithm_name}")
 
-    # We will then set the policy we will use for training, in this case epsilon-greedy (with different values)
+    # Policy
     epsilon_greedy_policy = EpsilonGreedyPolicy(epsilon=epsilon)
-    algo.learn(epsilon_greedy_policy,n_steps=n_steps, discount_rate=discount_factor, lr=learning_rate, lrdecay=lr_decay, n_episodes_decay=lr_episodes_decay, verbose=False)
 
-    avg_reward, avg_steps = evaluate_policy(algo.env, algo.q_table, max_policy, n_episodes=100)
-    writer.add_scalar("eval/avg_reward", avg_reward, t.number)
-    writer.add_scalar("eval/avg_steps", avg_steps, t.number)
-    # We will write the hyperparameters to then analyze them in Tensorboard
-    writer.add_hparams({
-        "algorithm": algorithm_name,
-        "learning_rate": learning_rate,
-        "discount_factor": discount_factor,
-        "epsilon":epsilon,
-        "lr_decay": lr_decay,
-        "lr_episodes_decay": lr_episodes_decay
-    }, {"avg_reward": avg_reward})
-    writer.close()
-    return avg_reward
+    # Seed por trial (para estabilidad y reproducibilidad en paralelo)
+    seed = 88 + t.number
+    obs, _ = env.reset(seed=seed)
+    env.action_space.seed(seed)
+
+    # Entrenamiento en chunks + pruning
+
+    steps_done = 0
+
+    try:
+        algo.learn(
+            epsilon_greedy_policy,
+            n_steps=n_steps_total,
+            discount_rate=discount_factor,
+            lr=learning_rate,
+            lrdecay=lr_decay,
+            n_episodes_decay=lr_episodes_decay,
+            verbose=False
+        )
+
+        # evaluación intermedia barata
+        #inter_reward, _ = evaluate_policy(algo.env, algo.q_table, max_policy, n_episodes=5)
+        #writer.add_scalar("eval/intermediate_reward", inter_reward, steps_done)
+
+        # report a Optuna y permite podar
+        # t.report(inter_reward, step=steps_done)
+        # if t.should_prune():
+            # raise optuna.TrialPruned()
+
+        # evaluación final del trial (más estable que 5, menos caro que 100)
+        avg_reward, avg_steps = evaluate_policy(algo.env, algo.q_table, max_policy, n_episodes=20)
+        writer.add_scalar("eval/avg_reward", avg_reward, t.number)
+        writer.add_scalar("eval/avg_steps",  avg_steps,  t.number)
+
+        # hparams resumidos
+        writer.add_hparams({
+            "algorithm": algorithm_name,
+            "learning_rate": learning_rate,
+            "discount_factor": discount_factor,
+            "epsilon": epsilon,
+            "lr_decay": lr_decay,
+            "lr_episodes_decay": lr_episodes_decay
+        }, {"avg_reward": avg_reward})
+
+        return avg_reward
+    finally:
+        writer.close()
+        env.close()
 
 if __name__ == "__main__": 
     # Removal of old logs and directories
@@ -99,11 +148,6 @@ if __name__ == "__main__":
     os.system("rm -rf ./boxing_optuna/")
     os.system("rm -rf ./boxing_logs/")
     os.system("mkdir -p ./boxing_optuna/")
-    # Environment setup
-    environment_name = 'ALE/Boxing-v5'
-    env = gym.make(environment_name, obs_type='ram', render_mode='rgb_array', frameskip=1)
-    env = RamFeatureWrapper(env, num_features=8)
-    env = DiscretizedObservationWrapper(env, n_bins=4)
 
     # Random seed
     seed = 88
@@ -114,18 +158,26 @@ if __name__ == "__main__":
     environment_study_name = "boxing"
     full_study_dir_path = f"boxing_optuna/{environment_study_name}"
     sampler = TPESampler(seed=seed)
-    study = optuna.create_study(sampler=sampler, direction='maximize', study_name=environment_study_name, storage=boxing_db, load_if_exists=True)
+    #pruner = MedianPruner(n_startup_trials=8, n_warmup_steps=3, interval_steps=1)
+    study = optuna.create_study(
+        sampler=sampler,
+        #pruner=pruner,
+        direction='maximize',
+        study_name=environment_study_name,
+        storage=boxing_db,
+        load_if_exists=True
+    )
     
     # Number of trials for the hyperparameter search
     trials_per_alg = 50
-    total_trials = 3 * trials_per_alg  # We will do 150 trials in total
+    total_trials = 4 * trials_per_alg  # 200 trials en total
 
     # Optuna hyperparameter search time
-    print(f"Starting the optuna hyperparameter search for environment: {environment_name}")
-    study.optimize(hyperparameter_analysis, n_trials=total_trials)
+    print("Starting the optuna hyperparameter search for environment: ALE/Boxing-v5")
 
-    # We close the environment
-    env.close()
+    # Paraleliza sin saturar (ajusta si notas CPU al 100%)
+    n_workers = min(max(1, os.cpu_count() - 1), 8)
+    study.optimize(hyperparameter_analysis, n_trials=total_trials, n_jobs=n_workers)
 
     # Save the best trial hyperparameters
     best_search = study.best_trial
