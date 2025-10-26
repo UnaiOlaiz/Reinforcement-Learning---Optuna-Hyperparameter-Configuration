@@ -1,0 +1,27 @@
+Trial number: 140
+Value: -0.16
+Hyperparameters obtained:
+learning_rate: 6.920065109223181e-05
+discount_factor: 0.9500000000000001
+epsilon: 0.15000000000000002
+lr_decay: 0.95
+lr_episodes_decay: 1000
+
+Trial number: 107
+Value: -1.64
+Hyperparameters obtained:
+learning_rate: 3.297097217597979e-05
+discount_factor: 0.9
+epsilon: 0.25
+lr_decay: 0.9299999999999999
+lr_episodes_decay: 1000
+
+Trial number: 131
+Value: -2.01
+Hyperparameters obtained:
+learning_rate: 0.00010083295539072123
+discount_factor: 0.9500000000000001
+epsilon: 0.1
+lr_decay: 0.94
+lr_episodes_decay: 1000
+
