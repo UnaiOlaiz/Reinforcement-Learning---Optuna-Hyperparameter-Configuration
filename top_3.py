@@ -21,7 +21,7 @@ from deustorl.helpers import DiscretizedObservationWrapper
 TXT_PATH = "boxing_top_3_trials.txt"
 ENV_NAME = "ALE/Boxing-v5"
 SEED_BASE = 88
-N_STEPS_TOTAL = 100_000         # pon 1_000_000 si quieres entrenar más
+N_STEPS_TOTAL = 1_000_000         # pon 1_000_000 si quieres entrenar más
 ALGORITHMS = ["Sarsa", "Qlearning", "ExpectedSarsa"]
 
 # Un único “root” para logs nuevos
